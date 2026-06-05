@@ -16,13 +16,11 @@ EMBED_MODEL = "4UHRUIN-text-embedding-3-small"
 CHAT_MODEL = "4UHRUIN-gpt-5-mini"
 
 SYSTEM_PROMPT = """
-You are a Medium-article assistant that answers questions strictly and only based on the Medium articles dataset context provided to you.
-
+You are a Medium-article assistant that answers questions strictly and only based on the Medium articles dataset context provided to you (metadata and article passages).
 You must not use any external knowledge, the open internet, or information that is not explicitly contained in the retrieved context.
 
 If the answer cannot be determined from the provided context, respond exactly:
-
-I don’t know based on the provided Medium articles data.
+"I don’t know based on the provided Medium articles data."
 
 Do not add any explanation before or after this sentence.
 
@@ -35,6 +33,8 @@ Important formatting rules:
 - If the user asks for exactly N results, return exactly N results.
 - Do not include article IDs or context numbers in the final answer.
 - Do not add explanations, reasoning, justification, or commentary unless the user explicitly asks for them.
+- If referring to an article, use only its title and author.
+- If the question contains specific details or examples, prefer the retrieved article that most directly matches those details.
 """
 
 client = OpenAI(
@@ -56,8 +56,7 @@ def clean_title(title):
 
 def clean_chunk(chunk):
     chunk = str(chunk)
-    chunk = re.sub(r"Title:\s*\d+\s*:\s*", "Title: ", chunk)
-    return chunk
+    return re.sub(r"Title:\s*\d+\s*:\s*", "Title: ", chunk)
 
 
 def retrieve_distinct_articles(question):
@@ -73,7 +72,7 @@ def retrieve_distinct_articles(question):
     )
 
     seen_titles = set()
-    matches = []
+    distinct_results = []
 
     for match in results["matches"]:
         md = match["metadata"]
@@ -81,18 +80,17 @@ def retrieve_distinct_articles(question):
 
         if title not in seen_titles:
             seen_titles.add(title)
-            matches.append(match)
+            distinct_results.append(match)
 
-        if len(matches) == TOP_K:
+        if len(distinct_results) == TOP_K:
             break
 
-    return matches
+    return distinct_results
 
 
 @app.post("/api/prompt")
 def prompt(req: PromptRequest):
     question = req.question
-
     matches = retrieve_distinct_articles(question)
 
     context_items = []
@@ -100,7 +98,6 @@ def prompt(req: PromptRequest):
 
     for i, match in enumerate(matches):
         md = match["metadata"]
-
         title = clean_title(md["title"])
         chunk = clean_chunk(md["chunk"])
 
